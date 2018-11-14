@@ -25,7 +25,7 @@ def pick_top_n(preds, vocab_size, top_n=5):
 
 class CharRNN():
     def __init__(self, num_classes, batch_size=64, num_steps=50, cell_type='LSTM',
-                 rnn_size=128, num_layers=2, learning_rate=0.001, 
+                 rnn_size=128, num_layers=2, learning_rate=0.001,
                  grad_clip=5, train_keep_prob=0.5, sampling=False):
         '''
         Initialize the input parameter to define the network
@@ -48,7 +48,7 @@ class CharRNN():
             batch_size, num_steps = batch_size, num_steps
 
         tf.reset_default_graph()
-        
+
         self.num_classes = num_classes
         self.batch_size = batch_size
         self.num_steps = num_steps
@@ -58,28 +58,29 @@ class CharRNN():
         self.learning_rate = learning_rate
         self.grad_clip = grad_clip
         self.train_keep_prob = train_keep_prob
-        
+        self.pred_keep_prob = 1
+
         self.inputs_layer()
         self.rnn_layer()
         self.outputs_layer()
         self.my_loss()
         self.my_optimizer()
         self.saver = tf.train.Saver()
-    
-    
+
+
     def inputs_layer(self):
         '''
         build the input layer
         '''
         self.inputs = tf.placeholder(tf.int32, shape=(self.batch_size, self.num_steps), name='inputs')
         self.targets = tf.placeholder(tf.int32, shape=(self.batch_size, self.num_steps), name='targets')
-        
+
         # add keep_prob
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
         # one_hot encoding
         self.rnn_inputs = tf.one_hot(self.inputs, self.num_classes)
-    
-    
+
+
     def rnn_layer(self):
         '''
         build rnn_cell layer
@@ -92,30 +93,40 @@ class CharRNN():
         #########################################################################################################
         #           TODO: finish the rnn layer definition, you should enable the selection of cell type         #
         #########################################################################################################
-        raise NotImplementedError('Please edit this function.')
-    
-    
+        if self.cell_type == 'LSTM':
+            cells = [tf.contrib.rnn.LSTMCell(self.rnn_size, state_is_tuple=True) for _ in range(self.num_layers)]
+        elif self.cell_type == 'GRU':
+            cells = [tf.contrib.rnn.GRUCell(self.rnn_size, state_is_tuple=True) for _ in range(self.num_layers)]
+
+        self.cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.MultiRNNCell(cells), output_keep_prob=self.keep_prob)
+
+        self.initial_state = self.cell.zero_state(self.batch_size, tf.float32)
+        output, state = tf.nn.dynamic_rnn(self.cell, self.rnn_inputs, initial_state=self.initial_state)
+
+        self.final_state = state
+        self.rnn_outputs = output
+
     def outputs_layer(self):
-        ''' 
+        '''
         build the output layer
         '''
         # concate the output of rnn_cell，example: [[1,2,3],[4,5,6]] -> [1,2,3,4,5,6]
         seq_output = tf.concat(self.rnn_outputs, axis=1) # tf.concat(concat_dim, values)
         # reshape
         x = tf.reshape(seq_output, [-1, self.rnn_size])
-        
+
         # define softmax layer variables:
         with tf.variable_scope('softmax'):
             softmax_w = tf.Variable(tf.truncated_normal([self.rnn_size, self.num_classes], stddev=0.1))
             softmax_b = tf.Variable(tf.zeros(self.num_classes))
-        
+
         # calculate logits
         self.logits = tf.matmul(x, softmax_w) + softmax_b
-        
+
         # softmax generate probability predictions
         self.prob_pred = tf.nn.softmax(self.logits, name='predictions')
-        
-        
+
+
     def my_loss(self):
         '''
         calculat loss according to logits and targets
@@ -123,19 +134,19 @@ class CharRNN():
         # One-hot coding
         y_one_hot = tf.one_hot(self.targets, self.num_classes)
         y_reshaped = tf.reshape(y_one_hot, self.logits.get_shape())
-        
+
         # Softmax cross entropy loss
         loss = tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.logits, labels=y_reshaped)
         self.loss = tf.reduce_mean(loss)
-        
-        
+
+
     def my_optimizer(self):
         '''
         build our optimizer
         Unlike previous worries of gradient vanishing problem,
-        for some structures of rnn cells, the calculation of hidden layers' weights 
+        for some structures of rnn cells, the calculation of hidden layers' weights
         may lead to an "exploding gradient" effect where the value keeps growing.
-        To mitigate this, we use the gradient clipping trick. Whenever the gradients are updated, 
+        To mitigate this, we use the gradient clipping trick. Whenever the gradients are updated,
         they are "clipped" to some reasonable range (like -5 to 5) so they will never get out of this range.
         parameters we will use:
         self.loss, self.grad_clip, self.learning_rate
@@ -146,9 +157,13 @@ class CharRNN():
         #######################################################
         # TODO: implement your optimizer with gradient clipping
         #######################################################
-        raise NotImplementedError('Please edit this function.')
-        
-        
+        opt = tf.train.AdamOptimizer(self.learning_rate)
+        tvars = tf.trainable_variables()
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars),
+                    self.grad_clip)
+        self.optimizer = opt.apply_gradients(zip(grads, tvars))
+
+
     def train(self, batches, max_count, save_every_n):
         self.session = tf.Session()
         with self.session as sess:
@@ -163,26 +178,26 @@ class CharRNN():
                         self.targets: y,
                         self.keep_prob: self.train_keep_prob,
                         self.initial_state: new_state}
-                batch_loss, new_state, _ = sess.run([self.loss, 
-                                                     self.final_state, 
-                                                     self.optimizer], 
+                batch_loss, new_state, _ = sess.run([self.loss,
+                                                     self.final_state,
+                                                     self.optimizer],
                                                      feed_dict=feed)
-                    
+
                 end = time.time()
                 if counter % 200 == 0:
                     print('step: {} '.format(counter),
                           'loss: {:.4f} '.format(batch_loss),
                           '{:.4f} sec/batch'.format((end-start)))
-                    
+
                 if (counter % save_every_n == 0):
-                    self.saver.save(sess, "checkpoints/i{}_l{}.ckpt".format(counter, self.rnn_size))
-                    
+                    self.saver.save(sess, "checkpoints/i{}_l{}_{}.ckpt".format(counter, self.rnn_size, self.cell_type))
+
                 if counter >= max_count:
                     break
-            
-            self.saver.save(sess, "checkpoints/i{}_l{}.ckpt".format(counter, self.rnn_size))
-               
-        
+
+            self.saver.save(sess, "checkpoints/i{}_l{}_{}.ckpt".format(counter, self.rnn_size, self.cell_type))
+
+
     def sample(self, checkpoint, n_samples, vocab_size, vocab_to_ind, ind_to_vocab, prime='You \n'):
         '''
         generate new text given the prime word
@@ -198,10 +213,32 @@ class CharRNN():
         samples = [c for c in prime]
         #####################################################################################
         # TODO: implement sampling function
-        # Hint: you should restore from saved checkpoint, start the model in sampling mode on 
+        # Hint: you should restore from saved checkpoint, start the model in sampling mode on
         # prime word first and then generate new characters, remember to use pick_top_n to
         # reduce the noise.
         #####################################################################################
-        raise NotImplementedError('Please edit this function.')
-    
-    
+        input = []
+        for ele in samples:
+            input.append(vocab_to_ind[ele])
+        sample_out = []
+        outputs = []
+        with tf.Session() as sess:
+            self.saver.restore(sess, checkpoint)
+            sess.run(tf.global_variables_initializer())
+            state = sess.run(self.initial_state)
+            for ele in input:
+                feed = {self.inputs: [[ele]],
+                        self.keep_prob: self.pred_keep_prob,
+                        self.initial_state : state}
+                state = sess.run(self.final_state, feed_dict = feed)
+
+            outputs.append(input[-1])
+            for i in range(n_samples):
+                feed = {self.inputs: [[outputs[i]]],
+                        self.keep_prob: self.pred_keep_prob,
+                        self.initial_state : state}
+                preds = sess.run(self.prob_pred, feed_dict = feed)
+                output = pick_top_n(preds, vocab_size, 5)
+                outputs.append(output)
+                sample_out.append(ind_to_vocab[output])
+            return ''.join(sample_out)
