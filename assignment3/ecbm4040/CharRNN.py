@@ -94,11 +94,11 @@ class CharRNN():
         #           TODO: finish the rnn layer definition, you should enable the selection of cell type         #
         #########################################################################################################
         if self.cell_type == 'LSTM':
-            cells = [tf.contrib.rnn.LSTMCell(self.rnn_size, state_is_tuple=True) for _ in range(self.num_layers)]
+            cells = [tf.nn.rnn_cell.LSTMCell(self.rnn_size, state_is_tuple=True) for _ in range(self.num_layers)]
         elif self.cell_type == 'GRU':
-            cells = [tf.contrib.rnn.GRUCell(self.rnn_size, state_is_tuple=True) for _ in range(self.num_layers)]
+            cells = [tf.nn.rnn_cell.GRUCell(self.rnn_size) for _ in range(self.num_layers)]
 
-        self.cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.MultiRNNCell(cells), output_keep_prob=self.keep_prob)
+        self.cell = tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.MultiRNNCell(cells), output_keep_prob=self.keep_prob)
 
         self.initial_state = self.cell.zero_state(self.batch_size, tf.float32)
         output, state = tf.nn.dynamic_rnn(self.cell, self.rnn_inputs, initial_state=self.initial_state)
@@ -190,12 +190,12 @@ class CharRNN():
                           '{:.4f} sec/batch'.format((end-start)))
 
                 if (counter % save_every_n == 0):
-                    self.saver.save(sess, "checkpoints/i{}_l{}_{}.ckpt".format(counter, self.rnn_size, self.cell_type))
+                    self.saver.save(sess, "checkpoints_whole/i{}_l{}_{}.ckpt".format(counter, self.rnn_size, self.cell_type))
 
                 if counter >= max_count:
                     break
 
-            self.saver.save(sess, "checkpoints/i{}_l{}_{}.ckpt".format(counter, self.rnn_size, self.cell_type))
+            self.saver.save(sess, "checkpoints_whole/i{}_l{}_{}.ckpt".format(counter, self.rnn_size, self.cell_type))
 
 
     def sample(self, checkpoint, n_samples, vocab_size, vocab_to_ind, ind_to_vocab, prime='You \n'):
@@ -221,24 +221,21 @@ class CharRNN():
         for ele in samples:
             input.append(vocab_to_ind[ele])
         sample_out = []
-        outputs = []
         with tf.Session() as sess:
             self.saver.restore(sess, checkpoint)
-            sess.run(tf.global_variables_initializer())
             state = sess.run(self.initial_state)
             for ele in input:
                 feed = {self.inputs: [[ele]],
                         self.keep_prob: self.pred_keep_prob,
-                        self.initial_state : state}
+                        self.initial_state: state}
                 state = sess.run(self.final_state, feed_dict = feed)
 
-            outputs.append(input[-1])
+            output = input[-1]
             for i in range(n_samples):
-                feed = {self.inputs: [[outputs[i]]],
+                feed = {self.inputs: [[output]],
                         self.keep_prob: self.pred_keep_prob,
                         self.initial_state : state}
-                preds = sess.run(self.prob_pred, feed_dict = feed)
+                preds, state = sess.run([self.prob_pred, self.final_state], feed_dict = feed)
                 output = pick_top_n(preds, vocab_size, 5)
-                outputs.append(output)
                 sample_out.append(ind_to_vocab[output])
             return ''.join(sample_out)
