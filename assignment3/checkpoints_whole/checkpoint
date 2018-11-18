@@ -1,0 +1,4 @@
+model_checkpoint_path: "i6000_l256_GRU.ckpt"
+all_model_checkpoint_paths: "i2000_l256_GRU.ckpt"
+all_model_checkpoint_paths: "i4000_l256_GRU.ckpt"
+all_model_checkpoint_paths: "i6000_l256_GRU.ckpt"
